@@ -30,9 +30,9 @@ $delegate goal Finish the migration and verify all tests
 
 The selected chat model never changes. The coordinator respects the platform's actual concurrency limit and may use fewer than the saved maximum. Agent creation has latency and usage cost, so more agents are not inherently faster or cheaper. Model selection considers task difficulty and current model capabilities; verify actual usage before claiming savings.
 
-### Local task checkpoints (development version)
+### Local task checkpoints
 
-This local version adds `priority balanced|speed|cost|quality` to the settings helper and `skills/delegate/scripts/run.py` for tracked tasks. The helper stores a short progress checkpoint and agent history in the user-level `delegate-runs` directory. It does not persist a full task backlog or call agent tools itself. The coordinator still plans and dispatches work through the session's subagent tools.
+Delegate adds `priority balanced|speed|cost|quality` to the settings helper and `skills/delegate/scripts/run.py` for tracked tasks. The helper stores a short progress checkpoint and agent history in the user-level `delegate-runs` directory. It does not persist a full task backlog or call agent tools itself. The coordinator still plans and dispatches work through the session's subagent tools.
 
 ```text
 $delegate priority cost
@@ -47,6 +47,8 @@ $delegate diagnostics
 ```
 
 Each assignment has an expected output, acceptance check, optional file ownership, and an observed dispatch-to-completion interval. The helper rejects a seventh distinct agent, duplicate assignment, and overlapping active file ownership. It records repairs, call history, actual usage when available, and advisory model observations. Budgets check estimates against recorded usage; they cannot guarantee a provider-side spending cap, so the coordinator pauses budgeted dispatch if usage is unavailable.
+
+`progress` shows idle agents. The coordinator reuses a suitable idle agent before spawning another, and waits for a busy agent when a new spawn would add more overhead than value. After the first agent, `run.py assign` requires `--new-agent-reason` for each fresh agent. A failed spawn can be recorded with `run.py spawn-failed`, which releases its reserved agent slot.
 
 ## Claude Code
 
@@ -88,6 +90,8 @@ Log each subagent call across all batches with target, model, distinct assignmen
 
 Add `priority <balanced|speed|cost|quality>` to persistent settings. Add `/delegate start [--budget-tokens N] [--budget-usd N] <task>`, `runs`, `progress [id]`, `calls [id]`, `pause [id]`, `resume [id]`, `stop [id]`, and `diagnostics`. The checkpoint saves only a concise progress summary and assignment history across chats, not a full backlog. The coordinator uses it to continue assigning the next ready work to idle or reusable agents. Give each assignment an expected output, acceptance check, and optional file ownership. Reject duplicate or overlapping active assignments; send failed checks back for repair. Record every actual agent call, result, and dispatch-to-completion interval. Track provider-reported token use and USD cost when available. Check per-task budget estimates before dispatch and pause if actual usage needed for accounting is unavailable; describe this as an estimate check, not a guaranteed provider cap. Suggest models from observed outcomes, time, and cost with sample counts, while checking current availability and using an allowed fallback when a model fails. Diagnostics must distinguish local settings checks from live agent-tool capabilities that a local script cannot inspect.
 
+Before each fresh spawn, check the run's idle agents and reuse a suitable one with `followup_task`. If all agents are busy, wait when a fresh spawn adds more overhead than value. Require a concrete `--new-agent-reason` for every additional agent after the first. A failed spawn must release its reserved distinct-agent slot. Keep the existing agent's model fixed for follow-up assignments. Test these rules with a temporary run.
+
 Validate the skill and test the settings helper with temporary state files: auto/manual switching, preserving a manual pool, a six-agent maximum, rejecting 0 and 7, rejecting an unavailable model without mutation, and reset. Report the installed paths and exact invocation syntax.
 ````
 
@@ -108,6 +112,8 @@ For each activated task, maintain a backlog with dependencies and completion cri
 Record each Agent and subagent message or resume call across all batches, target, model, purpose, outcome, dispatch time, and observed completion time. End with a concise worker table and call list covering every work interval. Label wall time as dispatch-to-completion elapsed time unless actual active runtime is supplied. Do not invent timing or claim savings without usage evidence.
 
 Add `priority <balanced|speed|cost|quality>` to saved settings. Add `/delegate start [--budget-tokens N] [--budget-usd N] <task>`, `runs`, `progress [id]`, `calls [id]`, `pause [id]`, `resume [id]`, `stop [id]`, and `diagnostics`. Save a concise progress checkpoint and assignment history across chats without persisting a full task backlog. For each Agent assignment, require a unique purpose, expected output, acceptance check, and optional file ownership. Reject duplicate or overlapping active assignments; route failed checks back for repair. Record actual Agent calls, completion intervals, and provider-reported usage or cost when available. Check estimates against a per-task budget before dispatch and pause when actual usage needed for the next dispatch is unavailable; never claim a provider-side hard cap. Use observed outcomes, elapsed time, and cost as advisory model signals with sample counts. Verify live alias availability, try another allowed alias after a failure, and clearly report the fallback. Diagnostics must say which live capabilities a local script cannot check.
+
+Before a fresh Agent spawn, inspect idle agents and resume a suitable one. If all are busy, wait when another spawn adds more overhead than value. Require a concrete `--new-agent-reason` for every additional agent after the first, and release a reserved slot when a spawn fails. Keep a resumed agent's model unchanged. Test idle reuse, justified spawns, and failed-spawn accounting with temporary state.
 
 Test the helper using temporary files: auto/manual switching, preserving the manual pool, rejecting 0 and 7, rejecting invalid model aliases without mutation, and reset. Verify Claude Code recognizes `/delegate` if authentication is available; if a live check is blocked, report the exact blocker. Report the installed paths and an example invocation.
 ````

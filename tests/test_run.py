@@ -24,6 +24,26 @@ def invoke(script: Path, runs: Path, home: Path, *arguments: str, success: bool 
 
 
 class RunTests(unittest.TestCase):
+    def test_new_agent_requires_reason_and_failed_spawn_releases_slot(self):
+        for script in SCRIPTS:
+            with self.subTest(script=script), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                home, runs = root / "home", root / "runs"
+                home.mkdir()
+                invoke(script, runs, home, "start", "Test reuse", "--id", "reuse")
+                invoke(script, runs, home, "assign", "reuse", "agent1", "model-a", "first",
+                       "--kind", "routine", "--expected", "Result", "--accept", "Correct")
+                invoke(script, runs, home, "finish", "reuse", "agent1", "success", "Done")
+                self.assertIn("Reuse an idle agent", invoke(script, runs, home, "assign", "reuse", "agent2", "model-b", "second",
+                                                               "--kind", "complex", "--expected", "Result", "--accept", "Correct", success=False))
+                invoke(script, runs, home, "assign", "reuse", "agent2", "model-b", "second",
+                       "--kind", "complex", "--expected", "Result", "--accept", "Correct",
+                       "--new-agent-reason", "Requires a model unavailable on agent1")
+                invoke(script, runs, home, "spawn-failed", "reuse", "agent2", "Model unavailable")
+                self.assertEqual(invoke(script, runs, home, "progress", "reuse")["agents_used"], 1)
+                invoke(script, runs, home, "assign", "reuse", "agent1", "model-a", "third",
+                       "--kind", "routine", "--expected", "Result", "--accept", "Correct")
+
     def test_priority_migrates_without_losing_settings(self):
         for script in SETTINGS_SCRIPTS:
             with self.subTest(script=script), tempfile.TemporaryDirectory() as temporary:
@@ -51,10 +71,11 @@ class RunTests(unittest.TestCase):
                 for index in range(6):
                     invoke(script, runs, home, "assign", "game", f"agent{index}", "model-a", f"piece {index}",
                            "--kind", "general", "--expected", "Working code", "--accept", "Checks pass",
-                           "--owns", f"src/part{index}")
+                           "--owns", f"src/part{index}", *(["--new-agent-reason", "Independent parallel work"] if index else []))
                 self.assertIn("Distinct-agent limit", invoke(script, runs, home, "assign", "game", "agent6", "model-a", "extra",
                                                                 "--kind", "general", "--expected", "Code", "--accept", "Works", success=False))
                 invoke(script, runs, home, "finish", "game", "agent0", "success", "Delivered")
+                self.assertIn("agent0", [item["agent"] for item in invoke(script, runs, home, "progress", "game")["idle_agents"]])
                 self.assertIn("Duplicate assignment", invoke(script, runs, home, "assign", "game", "agent0", "model-a", "piece 0",
                                                                 "--kind", "general", "--expected", "Code", "--accept", "Works", success=False))
                 self.assertIn("overlaps", invoke(script, runs, home, "assign", "game", "agent0", "model-a", "new work",
@@ -94,7 +115,8 @@ class RunTests(unittest.TestCase):
                        "--estimate-tokens", "50", "--estimate-usd", "0.5")
                 self.assertIn("exceeds", invoke(script, runs, home, "assign", "review", "agent2", "model-b", "review tests",
                                                  "--kind", "complex", "--expected", "Findings", "--accept", "Evidence",
-                                                 "--estimate-tokens", "60", "--estimate-usd", "0.6", success=False))
+                                                 "--estimate-tokens", "60", "--estimate-usd", "0.6",
+                                                 "--new-agent-reason", "Independent review", success=False))
                 invoke(script, runs, home, "finish", "review", "agent1", "failed", "Check failed")
                 self.assertIn("Record usage", invoke(script, runs, home, "assign", "review", "agent1", "model-a", "review module",
                                                        "--kind", "complex", "--expected", "Fix", "--accept", "Passes",
@@ -137,6 +159,9 @@ class RunTests(unittest.TestCase):
                 invoke(script, runs, home, "finish", "partial", "agent1", "success", "Done")
                 invoke(script, runs, home, "usage", "partial", "agent1", "30", "unknown")
                 self.assertEqual(invoke(script, runs, home, "status", "partial")["assignments"][0]["status"], "done")
+                self.assertIn("Reuse an idle agent", invoke(script, runs, home, "assign", "partial", "agent2", "model-a", "unneeded new agent",
+                                                               "--kind", "routine", "--expected", "Result", "--accept", "Correct",
+                                                               "--estimate-tokens", "20", success=False))
                 invoke(script, runs, home, "assign", "partial", "agent1", "model-a", "second",
                        "--kind", "routine", "--expected", "Result", "--accept", "Correct", "--estimate-tokens", "50")
                 invoke(script, runs, home, "finish", "partial", "agent1", "success", "Done")

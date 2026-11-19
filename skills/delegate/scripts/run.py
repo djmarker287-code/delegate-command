@@ -173,7 +173,7 @@ def recommendation(run: dict, kind: str, candidates: list[str], directory: Path)
             if history.get("version") != 1 or not isinstance(history.get("assignments"), list):
                 continue
             for entry in history["assignments"]:
-                if entry["model"] in observations and entry.get("kind") == kind and entry["status"] == "done" and entry["elapsed_seconds"] is not None:
+                if entry["model"] in observations and entry.get("kind") == kind and entry["status"] == "done" and not entry.get("spawn_failed") and entry["elapsed_seconds"] is not None:
                     observations[entry["model"]].append(entry)
         except (OSError, ValueError, KeyError, TypeError):
             continue
@@ -229,6 +229,7 @@ def main() -> int:
     assignment.add_argument("--accept", required=True)
     assignment.add_argument("--owns", action="append", default=[])
     assignment.add_argument("--retry-of")
+    assignment.add_argument("--new-agent-reason")
     assignment.add_argument("--estimate-tokens")
     assignment.add_argument("--estimate-usd")
     finish = commands.add_parser("finish")
@@ -236,6 +237,10 @@ def main() -> int:
     finish.add_argument("agent")
     finish.add_argument("outcome", choices=OUTCOMES)
     finish.add_argument("summary")
+    spawn_failed = commands.add_parser("spawn-failed")
+    spawn_failed.add_argument("id")
+    spawn_failed.add_argument("agent")
+    spawn_failed.add_argument("reason")
     usage = commands.add_parser("usage")
     usage.add_argument("id")
     usage.add_argument("agent")
@@ -303,10 +308,13 @@ def main() -> int:
             counts = {status: sum(entry["status"] == status for entry in run["assignments"]) for status in ("active", "awaiting_usage", "done")}
             active = [{"id": entry["id"], "agent": entry["agent"], "model": entry["model"], "purpose": entry["purpose"]}
                       for entry in run["assignments"] if entry["status"] == "active"]
+            busy = {entry["agent"] for entry in active}
+            idle = [{"agent": agent, "model": model} for agent, model in run["agents"].items() if agent not in busy]
             tokens, cost = usage_totals(run)
             outcomes = {outcome: sum(entry["outcome"] == outcome for entry in run["assignments"]) for outcome in OUTCOMES}
             print(json.dumps({"id": run["id"], "status": run["status"], "objective": run["objective"],
-                              "checkpoint": run["checkpoint"], "counts": counts, "outcomes": outcomes, "active": active,
+                              "checkpoint": run["checkpoint"], "counts": counts, "outcomes": outcomes,
+                              "active": active, "idle_agents": idle,
                               "agents_used": len(run["agents"]), "max_agents": run["max_agents"],
                               "usage_total": {"tokens": tokens, "usd": cost}, "budget": run["budget"]}))
             return 0
@@ -340,8 +348,15 @@ def main() -> int:
                 raise ValueError("Run must be active to assign work")
             if run.get("routing", {}).get("mode") == "manual" and args.model not in run["routing"]["models"]:
                 raise ValueError("Model is outside this run's saved manual pool")
-            if args.agent not in run["agents"] and len(run["agents"]) >= run["max_agents"]:
+            is_new = args.agent not in run["agents"]
+            if is_new and len(run["agents"]) >= run["max_agents"]:
                 raise ValueError("Distinct-agent limit reached; reuse an existing agent")
+            if is_new and run["agents"] and not (args.new_agent_reason or "").strip():
+                busy = {entry["agent"] for entry in run["assignments"] if entry["status"] == "active"}
+                idle = [agent for agent in run["agents"] if agent not in busy]
+                if idle:
+                    raise ValueError("Reuse an idle agent first: " + ", ".join(idle) + "; explain --new-agent-reason only if reuse is unsuitable")
+                raise ValueError("Explain --new-agent-reason before spawning another agent; reuse or wait when suitable")
             if args.agent in run["agents"] and run["agents"][args.agent] != args.model:
                 raise ValueError("An existing agent's model cannot change")
             if any(entry["agent"] == args.agent and entry["status"] == "active" for entry in run["assignments"]):
@@ -361,6 +376,7 @@ def main() -> int:
             run["assignments"].append({"id": f"A{len(run['assignments']) + 1}", "agent": args.agent,
                                        "model": args.model, "kind": args.kind, "purpose": args.purpose, "expected": args.expected,
                                        "accept": args.accept, "owns": args.owns, "retry_of": args.retry_of,
+                                       "new_agent_reason": args.new_agent_reason if is_new else None,
                                        "estimate_tokens": estimated_tokens, "estimate_usd": estimated_usd,
                                        "status": "active", "dispatched_at": now(), "completed_at": None,
                                        "elapsed_seconds": None, "outcome": None, "summary": None,
@@ -375,6 +391,19 @@ def main() -> int:
             entry["outcome"] = args.outcome
             entry["summary"] = args.summary
             entry["status"] = "awaiting_usage" if any(value is not None for value in run["budget"].values()) else "done"
+        elif args.command == "spawn-failed":
+            matches = [entry for entry in run["assignments"] if entry["agent"] == args.agent and entry["status"] == "active"]
+            if not matches:
+                raise ValueError("No active assignment for this agent")
+            entry = matches[-1]
+            entry["completed_at"] = now()
+            entry["elapsed_seconds"] = max(0.0, round((datetime.fromisoformat(entry["completed_at"]) - datetime.fromisoformat(entry["dispatched_at"])).total_seconds(), 3))
+            entry["outcome"] = "failed"
+            entry["summary"] = args.reason
+            entry["status"] = "done"
+            entry["spawn_failed"] = True
+            if not any(other is not entry and other["agent"] == args.agent and not other.get("spawn_failed") for other in run["assignments"]):
+                run["agents"].pop(args.agent, None)
         elif args.command == "usage":
             matches = [entry for entry in run["assignments"] if entry["agent"] == args.agent and entry["completed_at"]
                        and (entry["status"] == "awaiting_usage" or not entry.get("usage_recorded", False))]
