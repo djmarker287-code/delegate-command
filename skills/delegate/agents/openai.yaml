@@ -1,0 +1,4 @@
+interface:
+  display_name: "Delegate"
+  short_description: "Route work with up to six agents"
+  default_prompt: "Use $delegate to choose the best workers for this task within my saved agent limit."
