@@ -14,13 +14,14 @@ CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 MODELS = ("haiku", "sonnet", "opus")
 DEFAULT_MAX_AGENTS = 3
 HARD_MAX_AGENTS = 6
+PRIORITIES = ("balanced", "speed", "cost", "quality")
 
 
 def valid_state(data: dict) -> dict:
     mode = data.get("mode")
     models = data.get("models")
     maximum = data.get("max_agents")
-    if data.get("version") != 1 or mode not in ("auto", "manual"):
+    if data.get("version") not in (1, 2) or mode not in ("auto", "manual"):
         raise ValueError("Invalid Delegate settings")
     if not isinstance(models, list) or any(model not in MODELS for model in models):
         raise ValueError("Manual models must be haiku, sonnet, or opus")
@@ -28,13 +29,16 @@ def valid_state(data: dict) -> dict:
         raise ValueError("Duplicate manual models")
     if type(maximum) is not int or not 1 <= maximum <= HARD_MAX_AGENTS:
         raise ValueError("max_agents must be between 1 and 6")
-    return {"version": 1, "mode": mode, "models": models, "max_agents": maximum}
+    priority = data.get("priority", "balanced")
+    if priority not in PRIORITIES:
+        raise ValueError("priority must be balanced, speed, cost, or quality")
+    return {"version": 2, "mode": mode, "models": models, "max_agents": maximum, "priority": priority}
 
 
 def load_state(path: Path) -> dict:
     if path.exists():
         return valid_state(json.loads(path.read_text(encoding="utf-8")))
-    return {"version": 1, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS}
+    return valid_state({"version": 2, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS})
 
 
 def save_state(path: Path, data: dict) -> None:
@@ -65,14 +69,14 @@ def positive_count(value: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("models", "status", "select", "add", "remove", "auto", "manual", "count", "reset"))
+    parser.add_argument("command", choices=("models", "status", "select", "add", "remove", "auto", "manual", "count", "priority", "reset"))
     parser.add_argument("values", nargs="*")
     parser.add_argument("--state", type=Path, default=CLAUDE_HOME / "delegate.json")
     args = parser.parse_args()
 
     if args.command in ("models", "status", "manual", "reset") and args.values:
         parser.error(f"{args.command} takes no arguments")
-    if args.command in ("select", "add", "remove", "count") and not args.values:
+    if args.command in ("select", "add", "remove", "count", "priority") and not args.values:
         parser.error(f"{args.command} requires an argument")
     if args.command == "models":
         print("\n".join(MODELS))
@@ -85,7 +89,7 @@ def main() -> int:
 
     updated = dict(current)
     if args.command == "reset":
-        updated = {"version": 1, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS}
+        updated = {"version": 2, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS, "priority": "balanced"}
     elif args.command == "manual":
         if not current["models"]:
             raise ValueError("No saved manual models; use select <model> first")
@@ -94,6 +98,10 @@ def main() -> int:
         if len(args.values) != 1:
             parser.error("count requires exactly one number")
         updated["max_agents"] = positive_count(args.values[0])
+    elif args.command == "priority":
+        if len(args.values) != 1 or args.values[0] not in PRIORITIES:
+            parser.error("priority requires balanced, speed, cost, or quality")
+        updated["priority"] = args.values[0]
     elif args.command == "auto" or (args.command == "select" and args.values[0] == "auto"):
         counts = args.values if args.command == "auto" else args.values[1:]
         if len(counts) > 1:

@@ -15,6 +15,7 @@ from pathlib import Path
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 DEFAULT_MAX_AGENTS = 3
 HARD_MAX_AGENTS = 6
+PRIORITIES = ("balanced", "speed", "cost", "quality")
 
 
 def catalog_models(catalog: Path) -> list[str]:
@@ -45,7 +46,7 @@ def valid_state(data: dict) -> dict:
     mode = data.get("mode")
     models = data.get("models")
     maximum = data.get("max_agents")
-    if data.get("version") != 2 or mode not in ("auto", "manual"):
+    if data.get("version") not in (2, 3) or mode not in ("auto", "manual"):
         raise ValueError("Invalid delegate state file")
     if not isinstance(models, list) or any(not isinstance(m, str) for m in models):
         raise ValueError("Invalid saved worker model list")
@@ -53,7 +54,10 @@ def valid_state(data: dict) -> dict:
         raise ValueError("Duplicate worker models in state file")
     if type(maximum) is not int or not 1 <= maximum <= HARD_MAX_AGENTS:
         raise ValueError("max_agents must be between 1 and 6")
-    return {"version": 2, "mode": mode, "models": models, "max_agents": maximum}
+    priority = data.get("priority", "balanced")
+    if priority not in PRIORITIES:
+        raise ValueError("priority must be balanced, speed, cost, or quality")
+    return {"version": 3, "mode": mode, "models": models, "max_agents": maximum, "priority": priority}
 
 
 def load_state(state: Path, legacy_config: Path) -> dict:
@@ -95,7 +99,7 @@ def positive_count(value: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("models", "status", "select", "add", "remove", "auto", "manual", "count", "reset"))
+    parser.add_argument("command", choices=("models", "status", "select", "add", "remove", "auto", "manual", "count", "priority", "reset"))
     parser.add_argument("values", nargs="*")
     parser.add_argument("--state", type=Path, default=CODEX_HOME / "delegate.json")
     parser.add_argument("--catalog", type=Path, default=CODEX_HOME / "models_cache.codex_work_desktop.json")
@@ -104,7 +108,7 @@ def main() -> int:
 
     if args.command in ("models", "status", "manual", "reset") and args.values:
         parser.error(f"{args.command} takes no arguments")
-    if args.command in ("select", "add", "remove", "count") and not args.values:
+    if args.command in ("select", "add", "remove", "count", "priority") and not args.values:
         parser.error(f"{args.command} requires an argument")
 
     if args.command == "models":
@@ -118,7 +122,7 @@ def main() -> int:
 
     updated = dict(current)
     if args.command == "reset":
-        updated = {"version": 2, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS}
+        updated = {"version": 3, "mode": "auto", "models": [], "max_agents": DEFAULT_MAX_AGENTS, "priority": "balanced"}
     elif args.command == "manual":
         if not current["models"]:
             raise ValueError("No saved manual models; use select <model> first")
@@ -127,6 +131,10 @@ def main() -> int:
         if len(args.values) != 1:
             parser.error("count requires exactly one number")
         updated["max_agents"] = positive_count(args.values[0])
+    elif args.command == "priority":
+        if len(args.values) != 1 or args.values[0] not in PRIORITIES:
+            parser.error("priority requires balanced, speed, cost, or quality")
+        updated["priority"] = args.values[0]
     elif args.command == "auto" or (args.command == "select" and args.values[0] == "auto"):
         counts = args.values if args.command == "auto" else args.values[1:]
         if len(counts) > 1:

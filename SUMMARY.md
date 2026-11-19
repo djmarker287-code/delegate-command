@@ -7,3 +7,5 @@ Automatic mode selects worker models by task. Manual mode limits choices to a sa
 Codex uses `$delegate` or `/prompts:delegate`; Claude Code uses `/delegate`. Each platform has its own local settings file and model catalog. A shared prompt describes the same behavior, but the two products use different subagent tools and model names.
 
 The bottom of [README.md](README.md#copy-and-paste-prompts-to-create-the-skills) has complete copy-and-paste prompts to create the Codex and Claude Code skills from scratch.
+
+The local development version adds routing priorities and tracked task checkpoints. It saves a concise progress summary and agent history across chats without saving a full backlog. Each assignment has an expected result, acceptance check, optional file ownership, outcome, and observed elapsed time. The helpers reject a seventh distinct agent, duplicate work, and overlapping active file edits. They track actual usage when available, check per-task budget estimates, suggest models from observed results, and report local diagnostics. The chat model still calls the platform's agent tools and verifies live model availability.
