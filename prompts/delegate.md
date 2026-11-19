@@ -7,4 +7,4 @@ Find the installed `delegate` skill in the user-level Codex skills directory. Re
 
 Delegate command input: $ARGUMENTS
 
-Interpret `auto`, `manual`, `count`, `select`, `add`, `remove`, `models`, `status`, `reset`, and `off` as delegate controls. Interpret `goal <objective>` as a goal that uses delegation. If no input is given, activate delegation for this chat and show the setup. Otherwise carry out the task with the saved routing mode and agent limit.
+Interpret `auto`, `manual`, `count`, `select`, `add`, `remove`, `models`, `status`, `reset`, and `off` as delegate controls. Interpret `goal <objective>` as a goal that uses delegation. If no input is given, activate delegation for this chat and show the setup. Otherwise carry out the task with the saved routing mode and agent limit. Keep a backlog and dispatch successive distinct assignments to available agents until the whole task is complete; reuse existing agents when supported. Do not take over remaining implementation after the first batch returns.
